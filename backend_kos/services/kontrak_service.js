@@ -6,16 +6,16 @@ const Kos = require("../model/kos")
 const Kamar = require("../model/kamar")
 const Kontrak = require("../model/kontrak")
 
-exports.buat_kontrak = async (pemilik_id,body) => {
-    const { 
-        penyewa_id, 
-        kamar_id, 
-        tanggal_mulai, 
-        tanggal_selesai, 
-        harga_sewa, 
-        siklus } = body
+const validasiPayloadKontrak = (body) => {
+    const {
+        penyewa_id,
+        kamar_id,
+        tanggal_mulai,
+        tanggal_selesai,
+        harga_sewa,
+        siklus
+    } = body
 
-    // VALIDASI
     if (!kamar_id) {
         throwError("kamar_id tidak ditemukan", 400, "VALIDATION_ERROR")
     }
@@ -32,11 +32,11 @@ exports.buat_kontrak = async (pemilik_id,body) => {
     const selesai = new Date(tanggal_selesai)
     const harga = Number(harga_sewa)
 
-    if(isNaN(harga) || harga <= 0){
+    if (isNaN(harga) || harga <= 0) {
         throwError("format harga sewa tidak valid", 400, "VALIDATION_ERROR")
     }
 
-    if(isNaN(mulai.getTime())||isNaN(selesai.getTime())){
+    if (isNaN(mulai.getTime()) || isNaN(selesai.getTime())) {
         throwError("format tanggal tidak valid", 400, "VALIDATION_ERROR")
     }
 
@@ -44,79 +44,91 @@ exports.buat_kontrak = async (pemilik_id,body) => {
         throwError("tanggal selesai harus setelah tanggal mulai", 400, "VALIDATION_ERROR")
     }
 
-    const siklusValid = ["bulanan","mingguan","harian"]
+    const siklusValid = ["bulanan", "mingguan", "harian"]
 
-    if(!siklusValid.includes(siklus)){
-        throwError("siklus tidak valid",400,"VALIDATION_ERROR")
+    if (!siklusValid.includes(siklus)) {
+        throwError("siklus tidak valid", 400, "VALIDATION_ERROR")
     }
+
+    return {
+        penyewa_id,
+        kamar_id,
+        tanggal_mulai,
+        tanggal_selesai,
+        harga,
+        siklus
+    }
+}
+
+exports.buat_kontrak = async (pemilik_id,body) => {
+    const {
+        penyewa_id,
+        kamar_id,
+        tanggal_mulai,
+        tanggal_selesai,
+        harga,
+        siklus
+    } = validasiPayloadKontrak(body)
 
     //CEK KEPEMILIKAN
     const t = await sequelize.transaction()
 
-    const kamar = await Kamar.findOne({where:{
-        id:kamar_id,
-        status:"aktif",
-    },transaction:t,lock:t.LOCK.UPDATE})
-
-    if (!kamar) {
-        await t.rollback()
-        throwError("kamar tidak ditemukan atau bukan milik anda", 400, "VALIDATION_ERROR")
-    }
-
-    const kos = await Kos.findOne({where:{
-        id:kamar.kos_id,
-        pemilik_id:pemilik_id,
-        status:"aktif"
-    },transaction:t})
-
-    if (!kos) {
-        await t.rollback()
-        throwError("kos tidak ditemukan atau bukan milik anda", 400, "VALIDATION_ERROR")
-    }
-
-    const kontrakAktif = await Kontrak.findOne({
-        where:{
-            kamar_id:kamar_id,
-            status:"aktif"
-        },transaction:t
-    })
-
-    if(kontrakAktif){
-        await t.rollback()
-        throwError("kamar sedang dikontrak",400,"KAMAR_SUDAH_TERISI")
-    }
-
-    const penyewa = await Penyewa.findOne({where:{
-        id:penyewa_id,
-        pemilik_id:pemilik_id,
-        status:"aktif"
-    },transaction:t})
-
-    if (!penyewa) {
-        await t.rollback()
-        throwError("penyewa tidak ditemukan atau bukan milik anda", 400, "VALIDATION_ERROR")
-    }
-
-    //BUAT DATA KONTRAK
-    // const t = await sequelize.transaction()
-
     try {
+        const kamar = await Kamar.findOne({where:{
+            id:kamar_id,
+            status:"aktif",
+        },transaction:t,lock:t.LOCK.UPDATE})
+
+        if (!kamar) {
+            throwError("kamar tidak ditemukan atau bukan milik anda", 400, "VALIDATION_ERROR")
+        }
+
+        const kos = await Kos.findOne({where:{
+            id:kamar.kos_id,
+            pemilik_id:pemilik_id,
+            status:"aktif"
+        },transaction:t})
+
+        if (!kos) {
+            throwError("kos tidak ditemukan atau bukan milik anda", 400, "VALIDATION_ERROR")
+        }
+
+        const kontrakAktif = await Kontrak.findOne({
+            where:{
+                kamar_id:kamar_id,
+                status:"aktif"
+            },transaction:t
+        })
+
+        if(kontrakAktif){
+            throwError("kamar sedang dikontrak",400,"KAMAR_SUDAH_TERISI")
+        }
+
+        const penyewa = await Penyewa.findOne({where:{
+            id:penyewa_id,
+            pemilik_id:pemilik_id,
+            status:"aktif"
+        },transaction:t})
+
+        if (!penyewa) {
+            throwError("penyewa tidak ditemukan atau bukan milik anda", 400, "VALIDATION_ERROR")
+        }
+
+        //BUAT DATA KONTRAK
         const kontrak = await Kontrak.create({
-        penyewa_id, 
-        kamar_id, 
-        tanggal_mulai, 
-        tanggal_selesai, 
-        harga_sewa:harga, 
-        siklus
-    },{transaction:t})
+            penyewa_id,
+            kamar_id,
+            tanggal_mulai,
+            tanggal_selesai,
+            harga_sewa:harga,
+            siklus
+        },{transaction:t})
 
-    await kamar.update({
+        await kamar.update({
+            status_kondisi: "penuh"
+        },{transaction:t})
 
-        status: "terisi"
-
-    },{transaction:t})
-
-    await t.commit()
+        await t.commit()
 
         return kontrak
 
@@ -128,49 +140,14 @@ exports.buat_kontrak = async (pemilik_id,body) => {
 }
 
 exports.edit_kontrak = async (pemilik_id,kontrak_id,body) => {
-
-        const { 
-        penyewa_id, 
-        kamar_id, 
-        tanggal_mulai, 
-        tanggal_selesai, 
-        harga_sewa, 
-        siklus } = body
-
-    // VALIDASI
-    if (!kamar_id) {
-        throwError("kamar_id tidak ditemukan", 400, "VALIDATION_ERROR")
-    }
-
-    if (!penyewa_id) {
-        throwError("penyewa_id tidak ditemukan", 400, "VALIDATION_ERROR")
-    }
-
-    if (!tanggal_mulai || !tanggal_selesai || !harga_sewa || !siklus) {
-        throwError("data tidak lengkap", 400, "VALIDATION_ERROR")
-    }
-
-    const mulai = new Date(tanggal_mulai)
-    const selesai = new Date(tanggal_selesai)
-    const harga = Number(harga_sewa)
-
-    if(isNaN(harga) || harga <= 0){
-        throwError("format harga sewa tidak valid", 400, "VALIDATION_ERROR")
-    }
-
-    if(isNaN(mulai.getTime())||isNaN(selesai.getTime())){
-        throwError("format tanggal tidak valid", 400, "VALIDATION_ERROR")
-    }
-
-    if (selesai <= mulai) {
-        throwError("tanggal selesai harus setelah tanggal mulai", 400, "VALIDATION_ERROR")
-    }
-
-    const siklusValid = ["bulanan","mingguan","harian"]
-
-    if(!siklusValid.includes(siklus)){
-        throwError("siklus tidak valid",400,"VALIDATION_ERROR")
-    }
+    const {
+        penyewa_id,
+        kamar_id,
+        tanggal_mulai,
+        tanggal_selesai,
+        harga,
+        siklus
+    } = validasiPayloadKontrak(body)
 
     //CEK KEPEMILIKAN
 
@@ -204,7 +181,8 @@ exports.edit_kontrak = async (pemilik_id,kontrak_id,body) => {
     const penyewa = await Penyewa.findOne({
         where:{
             id:penyewa_id,
-            pemilik_id:pemilik_id
+            pemilik_id:pemilik_id,
+            status:"aktif"
         },transaction:t
     })
 
@@ -242,7 +220,7 @@ exports.edit_kontrak = async (pemilik_id,kontrak_id,body) => {
         kamar_id, 
         tanggal_mulai, 
         tanggal_selesai, 
-        harga_sewa, 
+        harga_sewa:harga,
         siklus
     },{transaction:t})
 
@@ -312,6 +290,10 @@ exports.batalkan_kontrak = async (pemilik_id, kontrak_id) => {
         // UPDATE STATUS KONTRAK MENJADI DIBATALKAN
         await kontrak.update({
             status:"dibatalkan"
+        },{transaction:t})
+
+        await kamar.update({
+            status_kondisi:"kosong"
         },{transaction:t})
 
         // COMMIT TRANSAKSI
